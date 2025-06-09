@@ -51,7 +51,7 @@
             <tbody>
                 {% for game in recent_games %}
                 <tr class="{% if game.is_completed %}{% if game.is_success %}game-won{% else %}game-lost{% endif %}{% else %}game-ongoing{% endif %}">
-                    <td>{{ game.date|date:"m-d H:i" }}</td>
+                    <td>{{ game.date|date:"m-d" }}</td>
                     <td>{{ game.rows }}x{{ game.cols }} ({{ game.mines }}雷)</td>
                     <td>
                         {% if game.is_completed %}
