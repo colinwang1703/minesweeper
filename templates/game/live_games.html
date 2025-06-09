@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>正在直播的游戏</h2>
+<p class="live-info">📢 只显示开始5分钟内的游戏，按最新创建排序</p>
+
+{% if live_games %}
+    <div class="live-games-grid" id="live-games-grid">
+        {% for game in live_games %}
+        <div class="live-game-card">
+            <div class="game-info">
+                <h3>{{ game.user.username }} 的游戏</h3>
+                <p class="game-details">
+                    {{ game.rows }}x{{ game.cols }} - {{ game.mines }}个雷
+                </p>
+                <p class="game-time">
+                    进行时间: {{ game.get_used_time|floatformat:0 }}秒
+                </p>
+                <p class="time-left">
+                    剩余观看时间: <span class="countdown" data-elapsed="{{ game.get_used_time|floatformat:0 }}">-</span>秒
+                </p>
+                <p class="spectator-info">
+                    <span class="spectator-count">👥 {{ game.spectator_count }}</span> 观众
+                </p>
+            </div>
+            <div class="game-actions">
+                <a href="{% url 'game:spectate' game.id %}" class="btn-spectate">观看游戏</a>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+{% else %}
+    <div class="no-live-games">
+        <p>目前没有正在进行的游戏（5分钟内）</p>
+        <a href="{% url 'game:new_game' %}" class="btn-primary">开始新游戏</a>
+    </div>
+{% endif %}
+
+<style>
+.live-info {
+    color: #666;
+    font-style: italic;
+    margin-bottom: 20px;
+    padding: 10px;
+    background: #f8f9fa;
+    border-radius: 4px;
+    border-left: 4px solid #17a2b8;
+}
+
+.live-games-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 20px;
+    margin-top: 20px;
+}
+
+.live-game-card {
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    padding: 15px;
+    background: white;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    transition: transform 0.2s;
+}
+
+.live-game-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+}
+
+.game-info h3 {
+    margin: 0 0 10px 0;
+    color: #333;
+}
+
+.game-details {
+    color: #666;
+    margin: 5px 0;
+}
+
+.game-time {
+    color: #28a745;
+    font-weight: bold;
+    margin: 5px 0;
+}
+
+.time-left {
+    color: #dc3545;
+    font-weight: bold;
+    margin: 5px 0;
+}
+
+.countdown.warning {
+    animation: blink 1s infinite;
+}
+
+@keyframes blink {
+    0%, 50% { opacity: 1; }
+    51%, 100% { opacity: 0.5; }
+}
+
+.spectator-info {
+    margin: 10px 0;
+}
+
+.spectator-count {
+    background: #e9ecef;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 0.9em;
+}
+
+.btn-spectate {
+    background: #17a2b8;
+    color: white;
+    padding: 8px 16px;
+    text-decoration: none;
+    border-radius: 4px;
+    display: inline-block;
+    margin-top: 10px;
+}
+
+.btn-spectate:hover {
+    background: #138496;
+}
+
+.btn-spectate.disabled {
+    background: #6c757d;
+    cursor: not-allowed;
+}
+
+.no-live-games {
+    text-align: center;
+    padding: 40px;
+    color: #666;
+}
+
+.btn-primary {
+    background: #007bff;
+    color: white;
+    padding: 10px 20px;
+    text-decoration: none;
+    border-radius: 4px;
+    display: inline-block;
+    margin-top: 15px;
+}
+</style>
+
+<script>
+function updateCountdowns() {
+    const countdowns = document.querySelectorAll('.countdown');
+    
+    countdowns.forEach(function(countdown) {
+        const elapsed = parseInt(countdown.dataset.elapsed);
+        const timeLeft = Math.max(0, 300 - elapsed);
+        
+        countdown.textContent = timeLeft;
+        
+        if (timeLeft <= 60) {
+            countdown.classList.add('warning');
+        }
+        
+        if (timeLeft <= 0) {
+            const card = countdown.closest('.live-game-card');
+            const button = card.querySelector('.btn-spectate');
+            button.classList.add('disabled');
+            button.textContent = '观看已结束';
+            button.onclick = function(e) { e.preventDefault(); };
+        }
+        
+        // 更新elapsed时间（每秒增加1）
+        countdown.dataset.elapsed = elapsed + 1;
+    });
+}
+
+// 每秒更新一次倒计时
+setInterval(updateCountdowns, 1000);
+
+// 初始化倒计时
+updateCountdowns();
+
+// 每5秒自动刷新页面
+setInterval(function() {
+    window.location.reload();
+}, 5000);
+</script>
+{% endblock %}

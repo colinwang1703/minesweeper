@@ -1,13 +1,15 @@
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
 from .models import Game
-import random
-import json
 from django.utils import timezone
 
-@login_required
+import random
+import json
+
+@login_required(login_url='/user/login/')
 def new_game(request):
     if request.method == 'POST':
+        rows = None
         match request.POST.get('mode'):
             case 'easy':
                 rows, cols, mines = 9, 9, 10
@@ -15,6 +17,9 @@ def new_game(request):
                 rows, cols, mines = 16, 16, 40
             case 'hard':
                 rows, cols, mines = 16, 30, 99
+        
+        if rows is None:
+            return redirect('lobby:index')
 
         game = Game.objects.create(user=request.user, rows=rows, cols=cols, mines=mines)
         
@@ -29,12 +34,12 @@ def new_game(request):
         
         return redirect('game:play', game_id=game.id)
     else:
-        return render(request, 'game/new.html')
+        return redirect('lobby:index')
+        #return render(request, 'game/new.html')
 
 def _auto_safe_clicks(game, target_revealed=9):
     """优化的自动安全点击"""
     mines = game.game_state['mines']
-    revealed = game.game_state['revealed']
     
     # 记录开始时间
     if not game.start_time:
@@ -84,9 +89,12 @@ def _count_neighbor_mines_fast(mines, x, y, rows, cols):
                 count += 1
     return count
 
-@login_required
+@login_required(login_url='/user/login/')
 def play(request, game_id):
-    game = get_object_or_404(Game, id=game_id, user=request.user)
+    game = get_object_or_404(Game, id=game_id)
+
+    if game.user != request.user:
+        return redirect('game:spectate', game_id=game_id)
     
     context = {
         'game': game,
@@ -99,7 +107,7 @@ def play(request, game_id):
     }
     return render(request, 'game/play.html', context)
 
-@login_required
+@login_required(login_url='/user/login/')
 def action(request, game_id):
     if request.method != 'POST':
         return redirect('game:play', game_id=game_id)
@@ -168,3 +176,4 @@ def _check_game_end(game):
     if revealed_safe == total_safe:
         # 游戏胜利
         game.mark_completed(is_win=True)
+

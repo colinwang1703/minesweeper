@@ -17,6 +17,10 @@ class Game(models.Model):
     start_time = models.DateTimeField(null=True, blank=True, verbose_name='开始时间')
     end_time = models.DateTimeField(null=True, blank=True, verbose_name='结束时间')
     
+    # 新增观众相关字段
+    allow_spectators = models.BooleanField(default=True, verbose_name='允许观众')
+    spectator_count = models.PositiveIntegerField(default=0, verbose_name='观众数量')
+    
     # 直接存储为JSON字符串，避免字符串操作
     game_state = models.JSONField(default=dict, verbose_name='游戏状态')
     # 格式: {
@@ -79,7 +83,23 @@ class Game(models.Model):
         end = self.end_time or timezone.now()
         return (end - self.start_time).total_seconds()
 
+    def can_be_spectated(self):
+        """判断是否可以被观看"""
+        return self.allow_spectators and not self.is_completed
+
     class Meta:
         verbose_name = '游戏'
         verbose_name_plural = '游戏列表'
         ordering = ['-date']
+
+class SpectatorSession(models.Model):
+    """观众会话模型"""
+    game = models.ForeignKey(Game, on_delete=models.CASCADE, verbose_name='游戏')
+    spectator = models.ForeignKey('auth.User', on_delete=models.CASCADE, verbose_name='观众')
+    join_time = models.DateTimeField(auto_now_add=True, verbose_name='加入时间')
+    last_seen = models.DateTimeField(auto_now=True, verbose_name='最后活跃时间')
+    
+    class Meta:
+        unique_together = ['game', 'spectator']
+        verbose_name = '观众会话'
+        verbose_name_plural = '观众会话列表'

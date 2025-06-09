@@ -3,10 +3,207 @@
 <h2>欢迎来到大厅，{{ user.username }}！</h2>
 {% if messages %}
     {% for message in messages %}
-    <p class="error-message">{{ message }}</p>
+        <p class="error-message">{{ message }}</p>
     {% endfor %}
 {% endif %}
 {% if rating %}
-<p>你的分数：{{ rating }}</p>
+    <p>你的分数：{{ rating }}</p>
 {% endif %}
+
+<!-- 新游戏部件 -->
+<div class="game-section">
+    <h3>开始新游戏</h3>
+    <form method="post" action="{% url 'game:new_game' %}" class="new-game-form">
+        {% csrf_token %}
+        <div class="form-group">
+            <label for="mode">难度选择：</label>
+            <select name="mode" id="mode">
+                <option value="easy">简单 (9x9, 10雷)</option>
+                <option value="medium">中等 (16x16, 40雷)</option>
+                <option value="hard">困难 (30x16, 99雷)</option>
+            </select>
+        </div>
+        <button type="submit" class="btn-primary">开始游戏</button>
+    </form>
+</div>
+
+<!-- 直播观看部件 -->
+<div class="game-section">
+    <h3>观看直播</h3>
+    <p>观看其他玩家的实时游戏</p>
+    <a href="{% url 'game:live_games' %}" class="btn-secondary">进入直播大厅</a>
+</div>
+
+<!-- 游戏列表部件 -->
+<div class="game-section">
+    <h3>最近的游戏</h3>
+    {% if recent_games %}
+        <table class="games-table">
+            <thead>
+                <tr>
+                    <th>日期</th>
+                    <th>难度</th>
+                    <th>状态</th>
+                    <th>用时</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for game in recent_games %}
+                <tr class="{% if game.is_completed %}{% if game.is_success %}game-won{% else %}game-lost{% endif %}{% else %}game-ongoing{% endif %}">
+                    <td>{{ game.date|date:"m-d H:i" }}</td>
+                    <td>{{ game.rows }}x{{ game.cols }} ({{ game.mines }}雷)</td>
+                    <td>
+                        {% if game.is_completed %}
+                            {% if game.is_success %}
+                                <span class="status-won">胜利</span>
+                            {% else %}
+                                <span class="status-lost">失败</span>
+                            {% endif %}
+                        {% else %}
+                            <span class="status-ongoing">进行中</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if game.get_used_time %}
+                            {{ game.get_used_time|floatformat:0 }}秒
+                        {% else %}
+                            -
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if not game.is_completed %}
+                            <a href="{% url 'game:play' game.id %}" class="btn-continue">继续游戏</a>
+                        {% else %}
+                            <a href="{% url 'game:play' game.id %}" class="btn-view">查看</a>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p class="no-games">还没有游戏记录，开始你的第一局吧！</p>
+    {% endif %}
+</div>
+
+<div class="game-section">
+    <div style="display: flex; justify-content: center; margin-top: 20px;">
+        <button style="font-size: 1rem; padding: 1rem 3rem; width: 100%; max-width: 400px; display: block;" onclick="location.href='{% url 'single:index' %}'">
+            单机游戏
+        </button>
+    </div>
+</div>
+
+<style>
+.game-section {
+    margin: 20px 0;
+    padding: 15px;
+    border: 1px solid #ddd;
+    border-radius: 5px;
+    background-color: #f9f9f9;
+}
+
+.new-game-form {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.form-group {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.form-group label {
+    font-weight: bold;
+}
+
+.form-group select {
+    padding: 5px 10px;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+}
+
+.btn-primary, .btn-secondary, .btn-continue, .btn-view {
+    padding: 8px 15px;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-block;
+}
+
+.btn-primary {
+    background-color: #007bff;
+    color: white;
+}
+
+.btn-secondary {
+    background-color: #17a2b8;
+    color: white;
+}
+
+.btn-continue {
+    background-color: #28a745;
+    color: white;
+}
+
+.btn-view {
+    background-color: #6c757d;
+    color: white;
+}
+
+.games-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 10px;
+}
+
+.games-table th,
+.games-table td {
+    padding: 10px;
+    text-align: left;
+    border-bottom: 1px solid #ddd;
+}
+
+.games-table th {
+    background-color: #f5f5f5;
+    font-weight: bold;
+}
+
+.game-won {
+    background-color: #d4edda;
+}
+
+.game-lost {
+    background-color: #f8d7da;
+}
+
+.game-ongoing {
+    background-color: #fff3cd;
+}
+
+.status-won {
+    color: #155724;
+    font-weight: bold;
+}
+
+.status-lost {
+    color: #721c24;
+    font-weight: bold;
+}
+
+.status-ongoing {
+    color: #856404;
+    font-weight: bold;
+}
+
+.no-games {
+    text-align: center;
+    color: #666;
+    font-style: italic;
+}
+</style>
 {% endblock %}
