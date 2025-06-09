@@ -2,10 +2,10 @@
 
 {% block content %}
 <div class="game-info">
-    <div>地雷: <span id="mine-count">{{ game.mines }}</span></div>
-    <div>标记: <span id="flag-count">0</span></div>
-    <div>时间: <span id="time">0.00</span>秒</div>
-    <div>观众: <span id="spectator-count">1</span>人</div>
+    <div>B<span id="mine-count">{{ game.mines }}</span></div>
+    <div>F<span id="flag-count">0</span></div>
+    <div>T<span id="time">0.00</span>s</div>
+    <div>A<span id="spectator-count">1</span></div>
 </div>
 
 <div class="controls">
@@ -203,7 +203,7 @@
         gameSocket.onopen = function(e) {
             console.log('WebSocket连接已建立');
             connectionStatus.className = 'connection-status connected';
-            connectionStatus.textContent = '🟢 实时连接';
+            connectionStatus.textContent = '🟢';
         };
         
         gameSocket.onmessage = function(e) {
@@ -214,7 +214,7 @@
         gameSocket.onclose = function(e) {
             console.log('WebSocket连接已关闭');
             connectionStatus.className = 'connection-status disconnected';
-            connectionStatus.textContent = '🔴 连接断开';
+            connectionStatus.textContent = '🔴';
             
             // 尝试重连
             setTimeout(() => {

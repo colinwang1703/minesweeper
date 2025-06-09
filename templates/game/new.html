@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>欢迎来到新游戏页面，{{ user.username }}！</h2>
+<form method="post">
+    {% csrf_token %}
+    <label for="mode">选择难度：</label>
+    <select name="mode" id="mode" required>
+        <option value="easy">简单 (9x9, 10雷)</option>
+        <option value="medium">中等 (16x16, 40雷)</option>
+        <option value="hard">困难 (16x30, 99雷)</option>
+    </select>
+    <div style="display: flex; justify-content: center; margin-top: 20px;">
+        <button style="font-size: 1rem; padding: 1rem 3rem; width: 100%; max-width: 400px; display: block;" type="submit">开始新游戏</button>
+    </div>
+    <div style="display: flex; justify-content: center; margin-top: 20px;">
+        <button style="font-size: 1rem; padding: 1rem 3rem; width: 100%; max-width: 400px; display: block;" onclick="location.href='{% url 'single:index' %}'">
+            单机游戏
+        </button>
+    </div>
+</form>
+
+
+
+{% endblock %}

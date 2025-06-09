@@ -7,19 +7,29 @@ from django.utils import timezone
 
 @login_required
 def new_game(request):
-    rows, cols, mines = 9, 9, 10  # 默认值
-    game = Game.objects.create(user=request.user, rows=rows, cols=cols, mines=mines)
-    
-    # 生成雷位置
-    total = rows * cols
-    mine_positions = set(random.sample(range(total), mines))
-    game.initialize_game_state(mine_positions)
-    
-    # 自动安全点击
-    _auto_safe_clicks(game, target_revealed=9)
-    game.save()
-    
-    return redirect('game:play', game_id=game.id)
+    if request.method == 'POST':
+        match request.POST.get('mode'):
+            case 'easy':
+                rows, cols, mines = 9, 9, 10
+            case 'medium':
+                rows, cols, mines = 16, 16, 40
+            case 'hard':
+                rows, cols, mines = 16, 30, 99
+
+        game = Game.objects.create(user=request.user, rows=rows, cols=cols, mines=mines)
+        
+        # 生成雷位置
+        total = rows * cols
+        mine_positions = set(random.sample(range(total), mines))
+        game.initialize_game_state(mine_positions)
+        
+        # 自动安全点击
+        _auto_safe_clicks(game, target_revealed=9)
+        game.save()
+        
+        return redirect('game:play', game_id=game.id)
+    else:
+        return render(request, 'game/new.html')
 
 def _auto_safe_clicks(game, target_revealed=9):
     """优化的自动安全点击"""

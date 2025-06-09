@@ -3,10 +3,10 @@
 <h2>欢迎来到大厅，{{ user.username }}！</h2>
 {% if messages %}
     {% for message in messages %}
-        <p class="error-message">{{ message }}</p>
+    <p class="error-message">{{ message }}</p>
     {% endfor %}
 {% endif %}
 {% if rating %}
-    <p>你的分数：{{ rating }}</p>
+<p>你的分数：{{ rating }}</p>
 {% endif %}
 {% endblock %}

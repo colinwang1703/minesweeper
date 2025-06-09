@@ -21,10 +21,10 @@ from django.conf.urls.static import static
 
 urlpatterns = [
     path('admin/', admin.site.urls),
+    path('', include('lobby.urls', namespace='lobby')),
     path('single/', include('single.urls', namespace='single')),
     path('user/', include('user.urls', namespace='user')),
     path('game/', include('game.urls', namespace='game')),
-    path('', include('lobby.urls', namespace='lobby')),
 ]
 
 
