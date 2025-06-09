@@ -16,12 +16,30 @@ class GameConsumer(AsyncWebsocketConsumer):
         
         await self.accept()
         
+        # 检查游戏是否存在
+        game = await self.get_game()
+        if not game:
+            await self.send(text_data=json.dumps({
+                'type': 'error',
+                'message': '游戏不存在'
+            }))
+            await self.close()
+            return
+        
         # 发送连接成功消息
         await self.send(text_data=json.dumps({
             'type': 'connection_established',
             'message': f'Connected to game {self.game_id}',
             'user': self.user.username if self.user and self.user.is_authenticated else 'Anonymous'
         }))
+        
+        # 发送当前游戏状态
+        game_data = await self.get_game_data()
+        if game_data:
+            await self.send(text_data=json.dumps({
+                'type': 'game_state',
+                'data': game_data
+            }))
         
         # 通知其他用户有人加入
         await self.channel_layer.group_send(
@@ -130,6 +148,14 @@ class GameConsumer(AsyncWebsocketConsumer):
 
     async def handle_spectator_action(self, data):
         """处理观众动作"""
+        # 添加用户认证检查
+        if not self.user or not self.user.is_authenticated:
+            await self.send(text_data=json.dumps({
+                'type': 'error',
+                'message': '需要登录才能发送消息'
+            }))
+            return
+            
         message_data = data.get('data', {})
         message_type = message_data.get('type')
         
@@ -139,7 +165,7 @@ class GameConsumer(AsyncWebsocketConsumer):
                 self.game_group_name,
                 {
                     'type': 'chat_message',
-                    'user': self.user.username if self.user and self.user.is_authenticated else 'Anonymous',
+                    'user': self.user.username,
                     'message': message_data.get('message', ''),
                     'timestamp': message_data.get('timestamp')
                 }
@@ -162,7 +188,7 @@ class GameConsumer(AsyncWebsocketConsumer):
                 'type': 'user_joined',
                 'user': event['user']
             }))
-
+    
     async def user_left(self, event):
         """用户离开通知"""
         await self.send(text_data=json.dumps({
@@ -200,7 +226,7 @@ class GameConsumer(AsyncWebsocketConsumer):
                 'rows': game.rows,
                 'cols': game.cols,
                 'mines': game.mines,
-                'state_matrix': game.get_state_matrix(),
+                'state': game.get_state_matrix(),  # 改为 'state' 而不是 'state_matrix'
                 'mines_matrix': game.get_mines_matrix(),
                 'is_completed': game.is_completed,
                 'is_success': game.is_success,

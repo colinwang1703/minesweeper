@@ -6,6 +6,8 @@ from django.contrib import messages
 from datetime import timedelta
 from .models import Game, SpectatorSession
 
+import json
+
 @login_required(login_url='/user/login/')
 def live_games(request):
     """显示可观看的直播游戏列表"""
@@ -67,6 +69,9 @@ def spectate(request, game_id):
         'game': game,
         'is_spectator': True,
         'spectator_count': active_spectators,
+        'state_matrix': json.dumps(game.get_state_matrix()),  # 转换为JSON字符串
+        'mines_matrix': json.dumps(game.get_mines_matrix()),  # 转换为JSON字符串
+        'used_time': game.get_used_time(),  # 添加用时
     }
     
     return render(request, 'game/spectate.html', context)

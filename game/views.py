@@ -176,4 +176,3 @@ def _check_game_end(game):
     if revealed_safe == total_safe:
         # 游戏胜利
         game.mark_completed(is_win=True)
-
