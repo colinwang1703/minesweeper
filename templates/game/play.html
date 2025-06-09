@@ -5,10 +5,18 @@
     <div>地雷: <span id="mine-count">{{ game.mines }}</span></div>
     <div>标记: <span id="flag-count">0</span></div>
     <div>时间: <span id="time">{{ used_time }}</span>秒</div>
+    {% if game.is_completed %}
+    <div class="game-status">
+        {% if game.is_success %}
+            <span class="status-win">✅ 胜利</span>
+        {% else %}
+            <span class="status-lose">💥 失败</span>
+        {% endif %}
+    </div>
+    {% endif %}
 </div>
 
 <div class="controls">
-    <button id="restart">重新开始</button>
     <button onclick="window.location.href='{% url "game:new_game" %}'">新游戏</button>
     <div id="start-time" style="margin-top: 10px; font-size: 14px; color: #666;">
         {% if start_time_str %}游戏开始时间: {{ start_time_str }}{% endif %}
@@ -21,96 +29,245 @@
 
 <div class="message" id="message"></div>
 
+<style>
+.status-win {
+    color: #4CAF50;
+    font-weight: bold;
+    animation: celebrate 2s ease-in-out;
+}
+
+.status-lose {
+    color: #f44336;
+    font-weight: bold;
+}
+
+@keyframes celebrate {
+    0%, 100% { transform: scale(1); }
+    25% { transform: scale(1.1); }
+    50% { transform: scale(1.05); }
+    75% { transform: scale(1.1); }
+}
+
+.message.win {
+    background: linear-gradient(45deg, #4CAF50, #45a049);
+    color: white;
+    padding: 15px;
+    border-radius: 8px;
+    font-size: 18px;
+    font-weight: bold;
+    text-align: center;
+    margin: 20px 0;
+    animation: winAnimation 3s ease-in-out;
+}
+
+.message.lose {
+    background: linear-gradient(45deg, #f44336, #da190b);
+    color: white;
+    padding: 15px;
+    border-radius: 8px;
+    font-size: 18px;
+    font-weight: bold;
+    text-align: center;
+    margin: 20px 0;
+}
+
+@keyframes winAnimation {
+    0% { transform: scale(0.8); opacity: 0; }
+    20% { transform: scale(1.1); opacity: 1; }
+    40% { transform: scale(0.95); }
+    60% { transform: scale(1.05); }
+    80% { transform: scale(0.98); }
+    100% { transform: scale(1); }
+}
+</style>
+
 <script>
-    // 从Django传递的数据
-    const gameData = {
-        gameId: {{ game.id }},
-        rows: {{ rows }},
-        cols: {{ cols }},
+    // 预编译模板数据
+    const GAME_DATA = {
+        id: {{ game.id }},
+        rows: {{ game.rows }},
+        cols: {{ game.cols }},
         mines: {{ game.mines }},
-        stateMatrix: {{ state_matrix|safe }},
-        minesMatrix: {{ mines_matrix|safe }},
-        usedTime: parseFloat("{{ used_time }}"),
-        gameStarted: "{{ start_time_str }}" !== "",
-        gameEnded: {{ game.end_time|yesno:"true,false" }}
+        state: {{ state_matrix|safe }},
+        mines_matrix: {{ mines_matrix|safe }},
+        ended: {{ game.is_completed|yesno:"true,false" }},
+        is_success: {{ game.is_success|yesno:"true,false" }},
+        used_time: parseFloat("{{ used_time }}")
     };
     
-    // 游戏状态
-    let gameState = {
-        gameId: gameData.gameId,
-        rows: gameData.rows,
-        cols: gameData.cols,
-        totalMines: gameData.mines,
-        board: [],
-        flagCount: 0,
-        revealedCount: 0,
-        gameOver: false,
-        gameStarted: gameData.gameStarted,
-        gameEnded: gameData.gameEnded
-    };
+    let flagCount = 0;
+    const board = document.getElementById('board');
+    const flagCountEl = document.getElementById('flag-count');
+    const mineCountEl = document.getElementById('mine-count');
+    const messageEl = document.getElementById('message');
     
-    // DOM 元素
-    const boardElement = document.getElementById('board');
-    const mineCountElement = document.getElementById('mine-count');
-    const flagCountElement = document.getElementById('flag-count');
-    const timeElement = document.getElementById('time');
-    const messageElement = document.getElementById('message');
-    const restartButton = document.getElementById('restart');
-    
-    // 初始化游戏
-    function initGame() {
-        // 重置状态
-        gameState.flagCount = 0;
-        gameState.revealedCount = 0;
-        gameState.gameOver = false;
+    // 一次性创建所有DOM元素
+    function initBoard() {
+        board.style.gridTemplateColumns = `repeat(${GAME_DATA.cols}, 30px)`;
+        board.innerHTML = '';
         
-        // 初始化棋盘数据结构
-        gameState.board = [];
-        for (let i = 0; i < gameState.rows; i++) {
-            gameState.board[i] = [];
-            for (let j = 0; j < gameState.cols; j++) {
-                const state = parseInt(gameData.stateMatrix[i][j]);
-                const isMine = parseInt(gameData.minesMatrix[i][j]) === 1;
+        const fragment = document.createDocumentFragment();
+        flagCount = 0;
+        let hasRevealedMine = false;
+        let revealedCount = 0;
+        
+        for (let i = 0; i < GAME_DATA.rows; i++) {
+            for (let j = 0; j < GAME_DATA.cols; j++) {
+                const cell = document.createElement('div');
+                cell.className = 'cell';
+                cell.dataset.row = i;
+                cell.dataset.col = j;
                 
-                gameState.board[i][j] = {
-                    isMine: isMine,
-                    isRevealed: state === 1,
-                    isFlagged: state === 2,
-                    neighborMines: 0
-                };
+                const state = GAME_DATA.state[i][j];
+                const isMine = GAME_DATA.mines_matrix[i][j];
                 
-                if (state === 1) gameState.revealedCount++;
-                if (state === 2) gameState.flagCount++;
+                if (state === 2) {
+                    cell.classList.add('flagged');
+                    cell.textContent = '🚩';
+                    flagCount++;
+                } else if (state === 1) {
+                    cell.classList.add('revealed');
+                    revealedCount++;
+                    if (isMine) {
+                        cell.classList.add('mine');
+                        cell.textContent = '💣';
+                        hasRevealedMine = true;
+                    } else {
+                        const count = countNeighborMines(i, j);
+                        if (count > 0) {
+                            cell.textContent = count;
+                            cell.classList.add(`number-${count}`);
+                        }
+                    }
+                }
+                
+                // 只有游戏未完成时才添加事件监听
+                if (!GAME_DATA.ended) {
+                    cell.onclick = () => handleClick(i, j, 'open');
+                    cell.oncontextmenu = (e) => {
+                        e.preventDefault();
+                        handleClick(i, j, 'flag');
+                    };
+                    cell.onmousedown = (e) => {
+                        if (e.button === 1) {
+                            e.preventDefault();
+                            handleMiddleClick(i, j);
+                        }
+                    };
+                }
+                
+                fragment.appendChild(cell);
             }
         }
         
-        // 计算邻居地雷数
-        for (let i = 0; i < gameState.rows; i++) {
-            for (let j = 0; j < gameState.cols; j++) {
-                if (!gameState.board[i][j].isMine) {
-                    gameState.board[i][j].neighborMines = countNeighborMines(i, j);
+        board.appendChild(fragment);
+        updateCounters();
+        
+        // 检查游戏状态并显示消息
+        checkGameStatus(hasRevealedMine, revealedCount);
+    }
+    
+    function checkGameStatus(hasRevealedMine, revealedCount) {
+        if (GAME_DATA.ended) {
+            if (GAME_DATA.is_success) {
+                // 游戏胜利
+                messageEl.innerHTML = `
+                    用时: ${GAME_DATA.used_time.toFixed(2)} 秒<br>
+                `;
+                messageEl.className = 'message win';
+                
+                // 胜利时的特效
+                celebrateWin();
+            } else {
+                // 游戏失败
+                messageEl.innerHTML = `
+                    游戏结束！你踩到了地雷！<br>
+                `;
+                messageEl.className = 'message lose';
+                
+                // 揭示所有地雷
+                revealAllMines();
+            }
+        } else if (hasRevealedMine) {
+            // 本地检测到踩雷（后端可能还没更新）
+            messageEl.textContent = '💥 游戏结束！你踩到了地雷！';
+            messageEl.className = 'message lose';
+            revealAllMines();
+        } else {
+            // 检查是否胜利（本地检测）
+            const totalSafeCells = GAME_DATA.rows * GAME_DATA.cols - GAME_DATA.mines;
+            if (revealedCount === totalSafeCells) {
+                messageEl.innerHTML = `
+                    🎉 恭喜你赢了！🎉<br>
+                    用时: ${GAME_DATA.used_time.toFixed(2)} 秒
+                `;
+                messageEl.className = 'message win';
+                celebrateWin();
+            }
+        }
+    }
+    
+    function celebrateWin() {
+        // 胜利庆祝动画
+        setTimeout(() => {
+            for (let i = 0; i < 50; i++) {
+                createConfetti();
+            }
+        }, 100);
+    }
+    
+    function createConfetti() {
+        const confetti = document.createElement('div');
+        confetti.style.cssText = `
+            position: fixed;
+            width: 10px;
+            height: 10px;
+            background: ${['#FFD700', '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4'][Math.floor(Math.random() * 5)]};
+            left: ${Math.random() * 100}vw;
+            top: -10px;
+            border-radius: 50%;
+            pointer-events: none;
+            z-index: 1000;
+            animation: confettiFall 3s linear forwards;
+        `;
+        document.body.appendChild(confetti);
+        
+        setTimeout(() => confetti.remove(), 3000);
+    }
+    
+    // 添加confetti动画样式
+    const style = document.createElement('style');
+    style.textContent = `
+        @keyframes confettiFall {
+            to {
+                transform: translateY(100vh) rotate(360deg);
+                opacity: 0;
+            }
+        }
+    `;
+    document.head.appendChild(style);
+    
+    function revealAllMines() {
+        // 显示所有地雷位置
+        for (let i = 0; i < GAME_DATA.rows; i++) {
+            for (let j = 0; j < GAME_DATA.cols; j++) {
+                if (GAME_DATA.mines_matrix[i][j] && GAME_DATA.state[i][j] !== 1) {
+                    const cell = board.children[i * GAME_DATA.cols + j];
+                    cell.classList.add('revealed', 'mine');
+                    cell.textContent = '💣';
                 }
             }
         }
-        
-        // 检查游戏状态
-        checkGameStatus();
-        
-        // 更新UI
-        updateUI();
-        updateCounters();
     }
     
-    // 计算周围地雷数
     function countNeighborMines(row, col) {
         let count = 0;
         for (let i = -1; i <= 1; i++) {
             for (let j = -1; j <= 1; j++) {
-                const newRow = row + i;
-                const newCol = col + j;
-                if (newRow >= 0 && newRow < gameState.rows && 
-                    newCol >= 0 && newCol < gameState.cols && 
-                    gameState.board[newRow][newCol].isMine) {
+                const newRow = row + i, newCol = col + j;
+                if (newRow >= 0 && newRow < GAME_DATA.rows && 
+                    newCol >= 0 && newCol < GAME_DATA.cols && 
+                    GAME_DATA.mines_matrix[newRow][newCol]) {
                     count++;
                 }
             }
@@ -118,236 +275,73 @@
         return count;
     }
     
-    // 更新UI
-    function updateUI() {
-        // 清空棋盘
-        boardElement.innerHTML = '';
-        
-        // 设置网格
-        boardElement.style.gridTemplateColumns = `repeat(${gameState.cols}, 30px)`;
-        boardElement.style.gridTemplateRows = `repeat(${gameState.rows}, 30px)`;
-        
-        // 创建格子
-        for (let i = 0; i < gameState.rows; i++) {
-            for (let j = 0; j < gameState.cols; j++) {
-                const cell = document.createElement('div');
-                cell.className = 'cell';
-                cell.dataset.row = i;
-                cell.dataset.col = j;
-                
-                const cellData = gameState.board[i][j];
-                
-                if (cellData.isRevealed) {
-                    cell.classList.add('revealed');
-                    if (cellData.isMine) {
-                        cell.classList.add('mine');
-                        cell.textContent = '💣';
-                    } else if (cellData.neighborMines > 0) {
-                        cell.textContent = cellData.neighborMines;
-                        cell.classList.add(`number-${cellData.neighborMines}`);
-                    }
-                } else if (cellData.isFlagged) {
-                    cell.classList.add('flagged');
-                    cell.textContent = '🚩';
-                }
-                
-                // 只有游戏未结束时才添加事件监听
-                if (!gameState.gameOver && !gameState.gameEnded) {
-                    cell.addEventListener('click', () => handleCellClick(i, j));
-                    cell.addEventListener('contextmenu', (e) => {
-                        e.preventDefault();
-                        handleRightClick(i, j);
-                    });
-                    
-                    // 添加中键点击事件（点开一片）
-                    cell.addEventListener('mousedown', (e) => {
-                        if (e.button === 1) { // 中键
-                            e.preventDefault();
-                            handleMiddleClick(i, j);
-                        }
-                    });
-                    
-                    // 添加双击事件（点开一片）
-                    cell.addEventListener('dblclick', (e) => {
-                        e.preventDefault();
-                        handleMiddleClick(i, j);
-                    });
-                }
-                
-                boardElement.appendChild(cell);
-            }
-        }
-    }
-    
-    // 更新计数器
     function updateCounters() {
-        flagCountElement.textContent = gameState.flagCount;
-        const remainingMines = gameState.totalMines - gameState.flagCount;
-        mineCountElement.textContent = Math.max(0, remainingMines);
+        flagCountEl.textContent = flagCount;
+        mineCountEl.textContent = Math.max(0, GAME_DATA.mines - flagCount);
     }
     
-    // 发送动作到服务器
-    async function sendAction(row, col, action) {
-        try {
-            const formData = new FormData();
-            formData.append('x', row);
-            formData.append('y', col);
-            formData.append('act', action);
-            formData.append('csrfmiddlewaretoken', document.querySelector('[name=csrfmiddlewaretoken]').value);
-            
-            const response = await fetch(`/game/${gameState.gameId}/action/`, {
-                method: 'POST',
-                body: formData
-            });
-            
-            if (response.ok) {
-                location.reload();
-            }
-        } catch (error) {
-            console.error('发送动作失败:', error);
-        }
-    }
-    
-    // 发送批量动作到服务器
-    async function sendBatchAction(actions) {
-        try {
-            const formData = new FormData();
-            formData.append('batch_actions', JSON.stringify(actions));
-            formData.append('csrfmiddlewaretoken', document.querySelector('[name=csrfmiddlewaretoken]').value);
-            
-            const response = await fetch(`/game/${gameState.gameId}/action/`, {
-                method: 'POST',
-                body: formData
-            });
-            
-            if (response.ok) {
-                location.reload();
-            }
-        } catch (error) {
-            console.error('发送批量动作失败:', error);
-        }
-    }
-    
-    // 处理格子点击
-    function handleCellClick(row, col) {
-        if (gameState.gameOver || gameState.gameEnded) return;
+    // 简化的事件处理
+    function handleClick(row, col, action) {
+        const form = new FormData();
+        form.append('x', row);
+        form.append('y', col);
+        form.append('act', action);
+        form.append('csrfmiddlewaretoken', '{{ csrf_token }}');
         
-        const cell = gameState.board[row][col];
-        if (cell.isFlagged || cell.isRevealed) return;
-        
-        // 发送打开动作到服务器
-        sendAction(row, col, 'open');
+        fetch(`/game/${GAME_DATA.id}/action/`, {
+            method: 'POST',
+            body: form
+        }).then(() => location.reload());
     }
     
-    // 处理右键点击
-    function handleRightClick(row, col) {
-        if (gameState.gameOver || gameState.gameEnded) return;
-        
-        const cell = gameState.board[row][col];
-        if (cell.isRevealed) return;
-        
-        // 发送标记动作到服务器
-        sendAction(row, col, 'flag');
-    }
-    
-    // 处理中键/双击（点开一片）
     function handleMiddleClick(row, col) {
-        if (gameState.gameOver || gameState.gameEnded) return;
+        // 实现中键点击逻辑
+        const cell = board.children[row * GAME_DATA.cols + col];
+        if (!cell.classList.contains('revealed')) return;
         
-        const cell = gameState.board[row][col];
-        if (!cell.isRevealed || cell.isMine) return;
-        
-        // 计算周围标记的地雷数
+        // 计算周围标记数和数字
+        const neighborMines = countNeighborMines(row, col);
         let flaggedCount = 0;
-        const neighbors = [];
+        const actions = [];
         
+        // 检查周围8个格子
         for (let i = -1; i <= 1; i++) {
             for (let j = -1; j <= 1; j++) {
+                if (i === 0 && j === 0) continue;
+                
                 const newRow = row + i;
                 const newCol = col + j;
                 
-                if (newRow >= 0 && newRow < gameState.rows && 
-                    newCol >= 0 && newCol < gameState.cols && 
-                    !(i === 0 && j === 0)) {
+                if (newRow >= 0 && newRow < GAME_DATA.rows && 
+                    newCol >= 0 && newCol < GAME_DATA.cols) {
                     
-                    const neighbor = gameState.board[newRow][newCol];
-                    neighbors.push({row: newRow, col: newCol, cell: neighbor});
+                    const neighborState = GAME_DATA.state[newRow][newCol];
                     
-                    if (neighbor.isFlagged) {
+                    if (neighborState === 2) { // 已标记
                         flaggedCount++;
+                    } else if (neighborState === 0) { // 未揭开且未标记
+                        actions.push({x: newRow, y: newCol, act: 'open'});
                     }
                 }
             }
         }
         
-        // 如果标记数等于该格子的数字，则打开所有未标记的邻居
-        if (flaggedCount === cell.neighborMines) {
-            const actions = [];
+        // 如果标记数等于周围地雷数，则打开所有未标记的邻居
+        if (flaggedCount === neighborMines && actions.length > 0) {
+            const form = new FormData();
+            form.append('batch_actions', JSON.stringify(actions));
+            form.append('csrfmiddlewaretoken', '{{ csrf_token }}');
             
-            for (const neighbor of neighbors) {
-                if (!neighbor.cell.isRevealed && !neighbor.cell.isFlagged) {
-                    actions.push({
-                        x: neighbor.row,
-                        y: neighbor.col,
-                        act: 'open'
-                    });
-                }
-            }
-            
-            if (actions.length > 0) {
-                sendBatchAction(actions);
-            }
+            fetch(`/game/${GAME_DATA.id}/action/`, {
+                method: 'POST',
+                body: form
+            }).then(() => location.reload());
         }
     }
     
-    // 检查游戏状态
-    function checkGameStatus() {
-        let hasRevealedMine = false;
-        let totalSafeCells = gameState.rows * gameState.cols - gameState.totalMines;
-        
-        // 检查是否踩到地雷
-        for (let i = 0; i < gameState.rows; i++) {
-            for (let j = 0; j < gameState.cols; j++) {
-                const cell = gameState.board[i][j];
-                if (cell.isRevealed && cell.isMine) {
-                    hasRevealedMine = true;
-                    break;
-                }
-            }
-            if (hasRevealedMine) break;
-        }
-        
-        if (hasRevealedMine) {
-            gameOver(false);
-        } else if (gameState.revealedCount === totalSafeCells) {
-            gameOver(true);
-        }
-    }
-    
-    // 游戏结束
-    function gameOver(isWin) {
-        gameState.gameOver = true;
-        
-        if (isWin) {
-            messageElement.textContent = `恭喜你赢了！用时 ${gameData.usedTime.toFixed(2)} 秒`;
-            messageElement.classList.add('win');
-        } else {
-            messageElement.textContent = '很遗憾，你输了！';
-            messageElement.classList.add('lose');
-        }
-        
-        updateUI();
-    }
-    
-    // 重新开始按钮
-    restartButton.addEventListener('click', () => {
-        window.location.href = `/game/${gameState.gameId}/`;
-    });
-    
-    // 初始化游戏
-    initGame();
+    // 初始化
+    initBoard();
 </script>
 
-<!-- CSRF token for AJAX requests -->
 {% csrf_token %}
 {% endblock %}
