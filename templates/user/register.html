@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>注册</h2>
+{% if messages %}
+    {% for message in messages %}
+        <p class="error-message">{{ message }}</p>
+    {% endfor %}
+{% endif %}
+<form method="post">
+    {% csrf_token %}
+    <label>用户名: <input type="text" name="username" required></label><br>
+    <label>密码: <input type="password" name="password" required></label><br>
+    <label>确认密码: <input type="password" name="password2" required></label><br>
+    <button type="submit">注册</button>
+</form>
+<p>已有账号？<a href="{% url 'user:login' %}">登录</a></p>
+{% endblock %}
