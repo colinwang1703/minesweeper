@@ -4,23 +4,13 @@
 <div class="game-info">
     <div>地雷: <span id="mine-count">{{ game.mines }}</span></div>
     <div>标记: <span id="flag-count">0</span></div>
-    <div>时间: <span id="time">{{ used_time }}</span>秒</div>
-    {% if game.is_completed %}
-    <div class="game-status">
-        {% if game.is_success %}
-            <span class="status-win">✅ 胜利</span>
-        {% else %}
-            <span class="status-lose">💥 失败</span>
-        {% endif %}
-    </div>
-    {% endif %}
+    <div>时间: <span id="time">0.00</span>秒</div>
+    <div>观众: <span id="spectator-count">1</span>人</div>
 </div>
 
 <div class="controls">
-    <button onclick="window.location.href='{% url "game:new_game" %}'">新游戏</button>
-    <div id="start-time" style="margin-top: 10px; font-size: 14px; color: #666;">
-        {% if start_time_str %}游戏开始时间: {{ start_time_str }}{% endif %}
-    </div>
+    <button id="new-game" onclick="window.location.href='{% url "game:new_game" %}'">新游戏</button>
+    <div id="start-time" style="margin-top: 10px; font-size: 14px; color: #666;"></div>
 </div>
 
 <div class="board-container">
@@ -28,6 +18,15 @@
 </div>
 
 <div class="message" id="message"></div>
+
+<!-- 观众聊天区域 -->
+<div class="spectator-panel" id="spectator-panel">
+    <div class="chat-messages" id="chat-messages"></div>
+    <div class="chat-input">
+        <input type="text" id="chat-input" placeholder="发送消息..." maxlength="200">
+        <button id="send-chat">发送</button>
+    </div>
+</div>
 
 <style>
 .status-win {
@@ -79,187 +78,450 @@
     80% { transform: scale(0.98); }
     100% { transform: scale(1); }
 }
+
+.spectator-panel {
+    margin-top: 20px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    padding: 10px;
+    max-height: 300px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    margin-bottom: 10px;
+    min-height: 200px;
+    border: 1px solid #eee;
+    padding: 10px;
+    border-radius: 4px;
+    background: #f9f9f9;
+}
+
+.chat-input {
+    display: flex;
+    gap: 10px;
+}
+
+.chat-input input {
+    flex: 1;
+    padding: 5px 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+}
+
+.chat-input button {
+    padding: 5px 15px;
+    background: #007bff;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.chat-message {
+    margin-bottom: 8px;
+    padding: 5px;
+    border-radius: 4px;
+}
+
+.chat-message.system {
+    background: #e3f2fd;
+    color: #1976d2;
+    font-style: italic;
+}
+
+.chat-message.user {
+    background: #f3e5f5;
+}
+
+.connection-status {
+    padding: 5px 10px;
+    border-radius: 4px;
+    margin: 10px 0;
+    text-align: center;
+}
+
+.connection-status.connected {
+    background: #d4edda;
+    color: #155724;
+}
+
+.connection-status.disconnected {
+    background: #f8d7da;
+    color: #721c24;
+}
 </style>
 
 <script>
-    // 预编译模板数据
-    const GAME_DATA = {
+    // 游戏数据
+    let GAME_DATA = {
         id: {{ game.id }},
         rows: {{ game.rows }},
         cols: {{ game.cols }},
         mines: {{ game.mines }},
         state: {{ state_matrix|safe }},
         mines_matrix: {{ mines_matrix|safe }},
-        ended: {{ game.is_completed|yesno:"true,false" }},
+        is_completed: {{ game.is_completed|yesno:"true,false" }},
         is_success: {{ game.is_success|yesno:"true,false" }},
-        used_time: parseFloat("{{ used_time }}")
+        used_time: parseFloat("{{ used_time }}"),
+        is_owner: {% if user == game.user %}true{% else %}false{% endif %}
     };
     
-    let flagCount = 0;
+    // WebSocket连接
+    let gameSocket;
+    let connectionStatus = document.createElement('div');
+    connectionStatus.className = 'connection-status disconnected';
+    connectionStatus.textContent = '正在连接...';
+    document.querySelector('.game-info').appendChild(connectionStatus);
+    
+    // DOM元素
     const board = document.getElementById('board');
     const flagCountEl = document.getElementById('flag-count');
     const mineCountEl = document.getElementById('mine-count');
+    const timeEl = document.getElementById('time');
     const messageEl = document.getElementById('message');
+    const spectatorCountEl = document.getElementById('spectator-count');
+    const chatMessages = document.getElementById('chat-messages');
+    const chatInput = document.getElementById('chat-input');
+    const sendChatBtn = document.getElementById('send-chat');
     
-    // 一次性创建所有DOM元素
+    let flagCount = 0;
+    let spectatorCount = 1;
+    let timeUpdateInterval;
+    
+    // 初始化WebSocket连接
+    function initWebSocket() {
+        const wsScheme = window.location.protocol === "https:" ? "wss" : "ws";
+        const wsPath = `${wsScheme}://${window.location.host}/ws/game/${GAME_DATA.id}/`;
+        
+        gameSocket = new WebSocket(wsPath);
+        
+        gameSocket.onopen = function(e) {
+            console.log('WebSocket连接已建立');
+            connectionStatus.className = 'connection-status connected';
+            connectionStatus.textContent = '🟢 实时连接';
+        };
+        
+        gameSocket.onmessage = function(e) {
+            const data = JSON.parse(e.data);
+            handleWebSocketMessage(data);
+        };
+        
+        gameSocket.onclose = function(e) {
+            console.log('WebSocket连接已关闭');
+            connectionStatus.className = 'connection-status disconnected';
+            connectionStatus.textContent = '🔴 连接断开';
+            
+            // 尝试重连
+            setTimeout(() => {
+                console.log('尝试重新连接...');
+                initWebSocket();
+            }, 3000);
+        };
+        
+        gameSocket.onerror = function(e) {
+            console.error('WebSocket错误:', e);
+        };
+    }
+    
+    // 更新单个格子显示
+    function updateCellDisplay(cell, state, isMine, i, j) {
+        console.log(`updateCellDisplay被调用: [${i}, ${j}], state: ${state}, isMine: ${isMine}`);
+        
+        // 保存原有的事件监听器
+        const onclick = cell.onclick;
+        const oncontextmenu = cell.oncontextmenu;
+        const onmousedown = cell.onmousedown;
+        
+        cell.className = 'cell';
+        cell.textContent = '';
+        
+        if (state === 2) {
+            cell.classList.add('flagged');
+            cell.textContent = '🚩';
+            console.log(`格子 [${i}, ${j}] 设置为标记状态`);
+        } else if (state === 1) {
+            cell.classList.add('revealed');
+            if (isMine) {
+                cell.classList.add('mine');
+                cell.textContent = '💣';
+                console.log(`格子 [${i}, ${j}] 显示为地雷`);
+            } else {
+                const count = countNeighborMines(i, j);
+                if (count > 0) {
+                    cell.textContent = count;
+                    cell.classList.add(`number-${count}`);
+                    console.log(`格子 [${i}, ${j}] 显示数字: ${count}`);
+                } else {
+                    console.log(`格子 [${i}, ${j}] 显示为空白`);
+                }
+            }
+        } else {
+            console.log(`格子 [${i}, ${j}] 保持未揭开状态`);
+        }
+        
+        // 恢复事件监听器
+        cell.onclick = onclick;
+        cell.oncontextmenu = oncontextmenu;
+        cell.onmousedown = onmousedown;
+    }
+    
+    // 更新整个棋盘
+    function updateBoard() {
+        console.log('updateBoard被调用');
+        console.log('当前GAME_DATA.state:', GAME_DATA.state);
+        
+        flagCount = 0; // 重置flag计数
+        for (let i = 0; i < GAME_DATA.rows; i++) {
+            for (let j = 0; j < GAME_DATA.cols; j++) {
+                const cell = board.children[i * GAME_DATA.cols + j];
+                if (!cell) {
+                    console.error(`找不到格子 [${i}, ${j}]`);
+                    continue;
+                }
+                
+                const state = GAME_DATA.state[i][j];
+                const isMine = GAME_DATA.mines_matrix[i][j];
+                
+                console.log(`更新格子 [${i}, ${j}], state: ${state}, isMine: ${isMine}`);
+                updateCellDisplay(cell, state, isMine, i, j);
+                
+                // 统计flag数量
+                if (state === 2) {
+                    flagCount++;
+                }
+            }
+        }
+        updateCounters();
+        checkGameStatus(); // 添加游戏状态检查
+    }
+    
+    // 初始化棋盘
     function initBoard() {
         board.style.gridTemplateColumns = `repeat(${GAME_DATA.cols}, 30px)`;
         board.innerHTML = '';
         
         const fragment = document.createDocumentFragment();
         flagCount = 0;
-        let hasRevealedMine = false;
-        let revealedCount = 0;
         
         for (let i = 0; i < GAME_DATA.rows; i++) {
             for (let j = 0; j < GAME_DATA.cols; j++) {
-                const cell = document.createElement('div');
-                cell.className = 'cell';
-                cell.dataset.row = i;
-                cell.dataset.col = j;
-                
-                const state = GAME_DATA.state[i][j];
-                const isMine = GAME_DATA.mines_matrix[i][j];
-                
-                if (state === 2) {
-                    cell.classList.add('flagged');
-                    cell.textContent = '🚩';
-                    flagCount++;
-                } else if (state === 1) {
-                    cell.classList.add('revealed');
-                    revealedCount++;
-                    if (isMine) {
-                        cell.classList.add('mine');
-                        cell.textContent = '💣';
-                        hasRevealedMine = true;
-                    } else {
-                        const count = countNeighborMines(i, j);
-                        if (count > 0) {
-                            cell.textContent = count;
-                            cell.classList.add(`number-${count}`);
-                        }
-                    }
-                }
-                
-                // 只有游戏未完成时才添加事件监听
-                if (!GAME_DATA.ended) {
-                    cell.onclick = () => handleClick(i, j, 'open');
-                    cell.oncontextmenu = (e) => {
-                        e.preventDefault();
-                        handleClick(i, j, 'flag');
-                    };
-                    cell.onmousedown = (e) => {
-                        if (e.button === 1) {
-                            e.preventDefault();
-                            handleMiddleClick(i, j);
-                        }
-                    };
-                }
-                
+                const cell = createCell(i, j);
                 fragment.appendChild(cell);
             }
         }
         
         board.appendChild(fragment);
         updateCounters();
-        
-        // 检查游戏状态并显示消息
-        checkGameStatus(hasRevealedMine, revealedCount);
+        checkGameStatus(); // 添加游戏状态检查
     }
     
-    function checkGameStatus(hasRevealedMine, revealedCount) {
-        if (GAME_DATA.ended) {
-            if (GAME_DATA.is_success) {
-                // 游戏胜利
-                messageEl.innerHTML = `
-                    用时: ${GAME_DATA.used_time.toFixed(2)} 秒<br>
-                `;
-                messageEl.className = 'message win';
+    // 创建单个格子
+    function createCell(i, j) {
+        const cell = document.createElement('div');
+        cell.className = 'cell';
+        cell.dataset.row = i;
+        cell.dataset.col = j;
+        
+        const state = GAME_DATA.state[i][j];
+        const isMine = GAME_DATA.mines_matrix[i][j];
+        
+        updateCellDisplay(cell, state, isMine, i, j);
+        
+        // 统计flag数量
+        if (state === 2) {
+            flagCount++;
+        }
+        
+        // 只有游戏所有者且游戏未完成时才能操作
+        if (GAME_DATA.is_owner && !GAME_DATA.is_completed) {
+            cell.onclick = () => handleCellClick(i, j, 'open');
+            cell.oncontextmenu = (e) => {
+                e.preventDefault();
+                handleCellClick(i, j, 'flag');
+            };
+            cell.onmousedown = (e) => {
+                if (e.button === 1) {
+                    e.preventDefault();
+                    handleMiddleClick(i, j);
+                }
+            };
+        }
+        
+        return cell;
+    }
+    
+    // 处理WebSocket消息
+    function handleWebSocketMessage(data) {
+        console.log('收到WebSocket消息:', data); // 添加调试日志
+        
+        switch(data.type) {
+            case 'connection_established':
+                console.log('连接已建立:', data.message);
+                break;
                 
-                // 胜利时的特效
-                celebrateWin();
-            } else {
-                // 游戏失败
-                messageEl.innerHTML = `
-                    游戏结束！你踩到了地雷！<br>
-                `;
-                messageEl.className = 'message lose';
+            case 'game_state':
+                console.log('处理game_state消息');
+                updateGameData(data.data);
+                initBoard();
+                break;
                 
-                // 揭示所有地雷
-                revealAllMines();
-            }
-        } else if (hasRevealedMine) {
-            // 本地检测到踩雷（后端可能还没更新）
-            messageEl.textContent = '💥 游戏结束！你踩到了地雷！';
-            messageEl.className = 'message lose';
-            revealAllMines();
+            case 'game_update':
+                console.log('处理game_update消息');
+                console.log('更新前的GAME_DATA.state:', GAME_DATA.state);
+                updateGameData(data.data);
+                console.log('更新后的GAME_DATA.state:', GAME_DATA.state);
+                updateBoard();
+                if (data.user) {
+                    addChatMessage(`${data.user} 进行了操作`, 'system');
+                }
+                break;
+                
+            case 'user_joined':
+                spectatorCount++;
+                spectatorCountEl.textContent = spectatorCount;
+                addChatMessage(`${data.user} 加入观看`, 'system');
+                break;
+                
+            case 'user_left':
+                spectatorCount = Math.max(1, spectatorCount - 1);
+                spectatorCountEl.textContent = spectatorCount;
+                addChatMessage(`${data.user} 离开了`, 'system');
+                break;
+                
+            case 'chat_message':
+                addChatMessage(`${data.user}: ${data.message}`, 'user');
+                break;
+                
+            case 'error':
+                console.error('WebSocket错误:', data.message);
+                alert(data.message);
+                break;
+                
+            default:
+                console.log('未知消息类型:', data.type);
+        }
+    }
+    
+    // 更新游戏数据
+    function updateGameData(newData) {
+        console.log('updateGameData被调用，newData:', newData);
+        
+        // 处理后端发送的数据格式转换
+        if (newData.state_matrix && !newData.state) {
+            newData.state = newData.state_matrix;
+        }
+        if (newData.mines_matrix_data && !newData.mines_matrix) {
+            newData.mines_matrix = newData.mines_matrix_data;
+        }
+        
+        GAME_DATA = {...GAME_DATA, ...newData};
+        console.log('更新后的GAME_DATA:', GAME_DATA);
+        
+        // 更新时间显示
+        if (newData.used_time !== undefined) {
+            timeEl.textContent = newData.used_time.toFixed(2);
+        }
+        
+        // 更新开始时间显示
+        if (newData.start_time) {
+            const startTime = new Date(newData.start_time);
+            document.getElementById('start-time').textContent = 
+                `游戏开始时间: ${startTime.toLocaleTimeString()}`;
+        }
+        
+        // 检查游戏状态
+        checkGameStatus();
+    }
+    
+    // 发送游戏动作
+    function sendGameAction(actionData) {
+        console.log('发送游戏动作:', actionData);
+        if (gameSocket.readyState === WebSocket.OPEN) {
+            gameSocket.send(JSON.stringify({
+                type: 'game_action',
+                data: actionData
+            }));
         } else {
-            // 检查是否胜利（本地检测）
-            const totalSafeCells = GAME_DATA.rows * GAME_DATA.cols - GAME_DATA.mines;
-            if (revealedCount === totalSafeCells) {
-                messageEl.innerHTML = `
-                    🎉 恭喜你赢了！🎉<br>
-                    用时: ${GAME_DATA.used_time.toFixed(2)} 秒
-                `;
-                messageEl.className = 'message win';
-                celebrateWin();
-            }
+            alert('连接断开，请刷新页面');
         }
     }
     
-    function celebrateWin() {
-        // 胜利庆祝动画
-        setTimeout(() => {
-            for (let i = 0; i < 50; i++) {
-                createConfetti();
-            }
-        }, 100);
+    // 发送聊天消息
+    function sendChatMessage(message) {
+        if (gameSocket.readyState === WebSocket.OPEN) {
+            gameSocket.send(JSON.stringify({
+                type: 'spectator_action',
+                data: {
+                    type: 'chat',
+                    message: message,
+                    timestamp: new Date().toISOString()
+                }
+            }));
+        }
     }
     
-    function createConfetti() {
-        const confetti = document.createElement('div');
-        confetti.style.cssText = `
-            position: fixed;
-            width: 10px;
-            height: 10px;
-            background: ${['#FFD700', '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4'][Math.floor(Math.random() * 5)]};
-            left: ${Math.random() * 100}vw;
-            top: -10px;
-            border-radius: 50%;
-            pointer-events: none;
-            z-index: 1000;
-            animation: confettiFall 3s linear forwards;
-        `;
-        document.body.appendChild(confetti);
+    // 添加聊天消息
+    function addChatMessage(message, type = 'user') {
+        const messageDiv = document.createElement('div');
+        messageDiv.className = `chat-message ${type}`;
+        messageDiv.textContent = message;
+        chatMessages.appendChild(messageDiv);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+    
+    // 处理格子点击
+    function handleCellClick(row, col, action) {
+        console.log(`点击格子 [${row}, ${col}], 动作: ${action}`);
+        sendGameAction({
+            x: row,
+            y: col,
+            act: action
+        });
+    }
+    
+    // 处理中键点击
+    function handleMiddleClick(row, col) {
+        const cell = board.children[row * GAME_DATA.cols + col];
+        if (!cell.classList.contains('revealed')) return;
         
-        setTimeout(() => confetti.remove(), 3000);
-    }
-    
-    // 添加confetti动画样式
-    const style = document.createElement('style');
-    style.textContent = `
-        @keyframes confettiFall {
-            to {
-                transform: translateY(100vh) rotate(360deg);
-                opacity: 0;
-            }
-        }
-    `;
-    document.head.appendChild(style);
-    
-    function revealAllMines() {
-        // 显示所有地雷位置
-        for (let i = 0; i < GAME_DATA.rows; i++) {
-            for (let j = 0; j < GAME_DATA.cols; j++) {
-                if (GAME_DATA.mines_matrix[i][j] && GAME_DATA.state[i][j] !== 1) {
-                    const cell = board.children[i * GAME_DATA.cols + j];
-                    cell.classList.add('revealed', 'mine');
-                    cell.textContent = '💣';
+        const neighborMines = countNeighborMines(row, col);
+        let flaggedCount = 0;
+        const actions = [];
+        
+        for (let i = -1; i <= 1; i++) {
+            for (let j = -1; j <= 1; j++) {
+                if (i === 0 && j === 0) continue;
+                
+                const newRow = row + i;
+                const newCol = col + j;
+                
+                if (newRow >= 0 && newRow < GAME_DATA.rows && 
+                    newCol >= 0 && newCol < GAME_DATA.cols) {
+                    
+                    const neighborState = GAME_DATA.state[newRow][newCol];
+                    
+                    if (neighborState === 2) {
+                        flaggedCount++;
+                    } else if (neighborState === 0) {
+                        actions.push({x: newRow, y: newCol, act: 'open'});
+                    }
                 }
             }
         }
+        
+        if (flaggedCount === neighborMines && actions.length > 0) {
+            sendGameAction({
+                batch_actions: actions
+            });
+        }
     }
     
+    // 计算邻居地雷数
     function countNeighborMines(row, col) {
         let count = 0;
         for (let i = -1; i <= 1; i++) {
@@ -275,71 +537,56 @@
         return count;
     }
     
+    // 更新计数器
     function updateCounters() {
         flagCountEl.textContent = flagCount;
         mineCountEl.textContent = Math.max(0, GAME_DATA.mines - flagCount);
     }
     
-    // 简化的事件处理
-    function handleClick(row, col, action) {
-        const form = new FormData();
-        form.append('x', row);
-        form.append('y', col);
-        form.append('act', action);
-        form.append('csrfmiddlewaretoken', '{{ csrf_token }}');
-        
-        fetch(`/game/${GAME_DATA.id}/action/`, {
-            method: 'POST',
-            body: form
-        }).then(() => location.reload());
+    // 检查游戏状态
+    function checkGameStatus() {
+        if (GAME_DATA.is_completed) {
+            if (GAME_DATA.is_success) {
+                messageEl.innerHTML = `🎉 游戏胜利！用时: ${GAME_DATA.used_time.toFixed(2)} 秒`;
+                messageEl.className = 'message win';
+            } else {
+                messageEl.innerHTML = `💥 游戏失败！`;
+                messageEl.className = 'message lose';
+                revealAllMines();
+            }
+        }
     }
     
-    function handleMiddleClick(row, col) {
-        // 实现中键点击逻辑
-        const cell = board.children[row * GAME_DATA.cols + col];
-        if (!cell.classList.contains('revealed')) return;
-        
-        // 计算周围标记数和数字
-        const neighborMines = countNeighborMines(row, col);
-        let flaggedCount = 0;
-        const actions = [];
-        
-        // 检查周围8个格子
-        for (let i = -1; i <= 1; i++) {
-            for (let j = -1; j <= 1; j++) {
-                if (i === 0 && j === 0) continue;
-                
-                const newRow = row + i;
-                const newCol = col + j;
-                
-                if (newRow >= 0 && newRow < GAME_DATA.rows && 
-                    newCol >= 0 && newCol < GAME_DATA.cols) {
-                    
-                    const neighborState = GAME_DATA.state[newRow][newCol];
-                    
-                    if (neighborState === 2) { // 已标记
-                        flaggedCount++;
-                    } else if (neighborState === 0) { // 未揭开且未标记
-                        actions.push({x: newRow, y: newCol, act: 'open'});
-                    }
+    // 显示所有地雷
+    function revealAllMines() {
+        for (let i = 0; i < GAME_DATA.rows; i++) {
+            for (let j = 0; j < GAME_DATA.cols; j++) {
+                if (GAME_DATA.mines_matrix[i][j] && GAME_DATA.state[i][j] !== 1) {
+                    const cell = board.children[i * GAME_DATA.cols + j];
+                    cell.classList.add('revealed', 'mine');
+                    cell.textContent = '💣';
                 }
             }
         }
-        
-        // 如果标记数等于周围地雷数，则打开所有未标记的邻居
-        if (flaggedCount === neighborMines && actions.length > 0) {
-            const form = new FormData();
-            form.append('batch_actions', JSON.stringify(actions));
-            form.append('csrfmiddlewaretoken', '{{ csrf_token }}');
-            
-            fetch(`/game/${GAME_DATA.id}/action/`, {
-                method: 'POST',
-                body: form
-            }).then(() => location.reload());
-        }
     }
     
+    // 聊天功能
+    sendChatBtn.addEventListener('click', () => {
+        const message = chatInput.value.trim();
+        if (message) {
+            sendChatMessage(message);
+            chatInput.value = '';
+        }
+    });
+    
+    chatInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            sendChatBtn.click();
+        }
+    });
+    
     // 初始化
+    initWebSocket();
     initBoard();
 </script>
 
